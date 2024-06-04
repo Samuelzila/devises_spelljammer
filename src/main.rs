@@ -269,6 +269,7 @@ Calculate new value for currency by passing its current value and a chaos value.
 */
 async fn calculate_rate(value: f64, chaos: f64) -> f64 {
     //The rate is the increase in value per day, in percentage.
+    //It appears that the actual increase is half of the input value.
     let rate = to_big_rationnal(0.15) / to_big_rationnal(365.2422);
     //x corresponds to the rate plus the chaos per day. The bigger either value is, the greater the
     //fluctuation will be. the chaos behaves similarly to a standard deviation.
@@ -280,7 +281,7 @@ async fn calculate_rate(value: f64, chaos: f64) -> f64 {
         ((to_big_rationnal(1.0) + &rate) / (to_big_rationnal(1.0) + &x)) - to_big_rationnal(1.0);
 
     //We generate a number between 0 and (x - y), then add y. Effectively, our random number is between y and x.
-    let random = to_big_rationnal(rand::thread_rng().gen_range(0.0..1.0)) * (&x - &y) + &y;
+    let random = to_big_rationnal(rand::thread_rng().gen_range(0.0..=1.0)) * (&x - &y) + &y;
 
     //This is just a one step exponential function with our random number as a parameter.
     (to_big_rationnal(value) * (to_big_rationnal(1.0) + (random)))
