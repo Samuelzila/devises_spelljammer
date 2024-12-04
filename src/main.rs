@@ -73,10 +73,10 @@ impl EventHandler for Handler {
             loop {
                 //Sleeping a few seconds will prevent the programm from executing this function twice in the same second
                 tokio::time::sleep(Duration::from_secs(2)).await;
-                //Convoluted way to find the time until midnight
+                //Convoluted way to find the time until 4 am
                 let time_until_midnight = (Local::now() + chrono::Duration::try_days(1).unwrap())
                     .date_naive()
-                    .and_hms_opt(0, 0, 0)
+                    .and_hms_opt(4, 0, 0)
                     .unwrap()
                     .signed_duration_since(Local::now().naive_local())
                     .to_std()
@@ -216,7 +216,7 @@ async fn add_data(amount: usize) {
             data.data[4].push(reference_lum);
         }
 
-        fs::write(CONFIG_PATH, serde_json::to_string_pretty(&data).unwrap())
+        fs::write(CONFIG_PATH, serde_json::to_string(&data).unwrap())
             .expect("Could not write to file.");
     }
 }
@@ -238,7 +238,7 @@ async fn push_data(data: (f64, f64, f64, f64, f64), msg: &Message) {
     config.data[3].push(data.3);
     config.data[4].push(data.4);
 
-    fs::write(CONFIG_PATH, serde_json::to_string_pretty(&config).unwrap())
+    fs::write(CONFIG_PATH, serde_json::to_string(&config).unwrap())
         .expect("Could not write to file.");
 }
 
@@ -247,7 +247,7 @@ fn is_admin(member: impl Into<PartialMember>) -> bool {
     member.into().permissions.unwrap().administrator()
 }
 
-/*
+/**
 Sends a permission denied error to the channel.
 */
 #[inline]
