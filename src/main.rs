@@ -19,7 +19,7 @@ use serenity::{
     model::{channel::Message, gateway::Ready},
     prelude::*,
 };
-use std::{cmp::Ordering, fs, path::Path, time::Duration};
+use std::{cmp::Ordering, fs, io, path::Path, time::Duration};
 
 #[derive(Serialize, Deserialize)]
 struct Data {
@@ -216,7 +216,7 @@ async fn add_data(amount: usize) {
             data.data[4].push(reference_lum);
         }
 
-        fs::write(CONFIG_PATH, serde_json::to_string(&data).unwrap())
+        write_file(CONFIG_PATH, serde_json::to_string(&data).unwrap())
             .expect("Could not write to file.");
     }
 }
@@ -238,7 +238,7 @@ async fn push_data(data: (f64, f64, f64, f64, f64), msg: &Message) {
     config.data[3].push(data.3);
     config.data[4].push(data.4);
 
-    fs::write(CONFIG_PATH, serde_json::to_string(&config).unwrap())
+    write_file(CONFIG_PATH, serde_json::to_string(&config).unwrap())
         .expect("Could not write to file.");
 }
 
@@ -262,6 +262,21 @@ async fn fak_you(ctx: &Context, command: &CommandInteraction) {
 
 async fn get_data() -> Data {
     serde_json::from_slice(&fs::read(CONFIG_PATH).expect("Unable to read file.")).unwrap()
+}
+
+fn write_file<P, S>(path: P, contents: S) -> Result<(), io::Error>
+where
+    P: AsRef<std::path::Path>,
+    S: Into<String>,
+{
+    let mut contents = contents.into();
+    //Remove extra brackets that appear out of nowhere when converting json to string.
+    if &contents[contents.len() - 2..] == "}}" {
+        contents.pop();
+    }
+    fs::write(path, contents)?;
+
+    Ok(())
 }
 
 /**
