@@ -3,11 +3,13 @@ const CONFIG_PATH: &str = "./config";
 use chrono::Local;
 use num::{rational::Ratio, BigInt, BigRational, FromPrimitive, ToPrimitive};
 use plotters::{
+    data,
     prelude::*,
     style::full_palette::{BROWN, LIGHTBLUE, YELLOW_800},
 };
 use rand::Rng;
 use resvg::usvg;
+use rusqlite as sql;
 use serde::{Deserialize, Serialize};
 use serenity::{
     all::{
@@ -35,13 +37,41 @@ impl From<Message> for Data {
     }
 }
 
+// Initialize SQLite database
+fn init_db() -> sql::Result<sql::Connection> {
+    let conn = sql::Connection::open("./currency.sqlite3")?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS currency_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            terre REAL NOT NULL,
+            air REAL NOT NULL,
+            eau REAL NOT NULL,
+            feu REAL NOT NULL,
+            lumiere REAL NOT NULL
+        )",
+        [],
+    )?;
+
+    // Insert initial data if the table is empty
+    conn.execute(
+        "INSERT INTO currency_data (terre, air, eau, feu, lumiere) 
+         SELECT 1.0, 200.0, 10.0, 50.0, 1.0 
+         WHERE NOT EXISTS (SELECT 1 FROM currency_data)",
+        [],
+    )?;
+
+    Ok(conn)
+}
+
 struct Handler;
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         //Update graph when bot loads.
-        draw_graph().await;
-        update_message(&ctx).await;
+        if Path::new(CONFIG_PATH).exists() {
+            draw_graph().await.unwrap();
+            update_message(&ctx).await.unwrap();
+        }
 
         println!("{} is connected!", ready.user.name);
 
@@ -86,11 +116,11 @@ impl EventHandler for Handler {
 
                 //If config exists, add points to it
                 if Path::new(CONFIG_PATH).exists() {
-                    add_data(1).await;
+                    add_data(1).await.unwrap();
 
-                    draw_graph().await;
+                    draw_graph().await.unwrap();
 
-                    update_message(&ctx).await;
+                    update_message(&ctx).await.unwrap();
                 }
             }
         });
@@ -107,13 +137,6 @@ impl EventHandler for Handler {
                 } else {
                     //Only create config file if it doesn't already exist
                     if !Path::new(CONFIG_PATH).exists() {
-                        //Initiate base values
-                        let mut reference_terre: f64 = 1.0;
-                        let mut reference_eau: f64 = 10.0;
-                        let mut reference_feu: f64 = 50.0;
-                        let mut reference_air: f64 = 200.0;
-                        let mut reference_lum: f64 = 1.0;
-
                         //Sending first message and storing its id
                         command
                             .create_response(
@@ -128,28 +151,14 @@ impl EventHandler for Handler {
 
                         let client_msg = command.get_response(&ctx.http).await.unwrap();
 
-                        //Calculate the new values based on specified currency rate and specified chaos
-                        reference_terre = calculate_rate(reference_terre, 1.0).await;
-                        reference_air = calculate_rate(reference_air, 50.0).await;
-                        reference_eau = calculate_rate(reference_eau, 3.0).await;
-                        reference_feu = calculate_rate(reference_feu, 5.0).await;
-                        reference_lum = calculate_rate(reference_lum, 1.0).await;
+                        //Store message in config file
+                        let data: Data = client_msg.into();
+                        write_file(CONFIG_PATH, serde_json::to_string(&data).unwrap())
+                            .expect("Could not write config file.");
 
-                        push_data(
-                            (
-                                reference_terre,
-                                reference_air,
-                                reference_eau,
-                                reference_feu,
-                                reference_lum,
-                            ),
-                            &client_msg,
-                        )
-                        .await;
+                        draw_graph().await.unwrap();
 
-                        draw_graph().await;
-
-                        update_message(&ctx).await;
+                        update_message(&ctx).await.unwrap();
                     } else {
                         fak_you(&ctx, &command).await;
                     }
@@ -159,25 +168,39 @@ impl EventHandler for Handler {
                     fak_you(&ctx, &command).await;
                 } else {
                     //Add simulated data for spcified amount of time.
-                    add_data(command.data.options[0].value.as_i64().unwrap() as usize).await;
+                    add_data(command.data.options[0].value.as_i64().unwrap() as usize)
+                        .await
+                        .unwrap();
 
-                    draw_graph().await;
+                    draw_graph().await.unwrap();
 
-                    update_message(&ctx).await;
+                    update_message(&ctx).await.unwrap();
                 }
             }
         }
     }
 }
 
-async fn update_message(ctx: &Context) {
-    let mut data = get_data().await;
+async fn get_config() -> Result<Data, io::Error> {
+    //Read config file
+    let contents = fs::read_to_string(CONFIG_PATH)?;
+    //Parse config file
+    let data: Data = serde_json::from_str(&contents)?;
 
-    let reference_terre = *data.data[0].last().unwrap();
-    let reference_air = *data.data[1].last().unwrap();
-    let reference_eau = *data.data[2].last().unwrap();
-    let reference_feu = *data.data[3].last().unwrap();
-    let reference_lum = *data.data[4].last().unwrap();
+    Ok(data)
+}
+
+async fn update_message(ctx: &Context) -> Result<(), Box<dyn std::error::Error>> {
+    let data = get_data().await?;
+    let mut message = get_config().await?.message;
+
+    let last = data.last().unwrap();
+
+    let reference_terre = last.terre;
+    let reference_air = last.air;
+    let reference_eau = last.eau;
+    let reference_feu = last.feu;
+    let reference_lum = last.lumiere;
 
     //Update discord message
     let new_message = EditMessage::new().content(
@@ -186,60 +209,56 @@ async fn update_message(ctx: &Context) {
     .remove_all_attachments()
     .new_attachment(CreateAttachment::path("./images/graph.png").await.expect("Could not attach graph."));
 
-    data.message.edit(&ctx.http, new_message).await.unwrap();
+    message.edit(&ctx.http, new_message).await.unwrap();
+
+    Ok(())
 }
 
-async fn add_data(amount: usize) {
-    //If config exists, add points to it
-    if Path::new(CONFIG_PATH).exists() {
-        let mut data = get_data().await;
+async fn add_data(amount: usize) -> Result<(), sql::Error> {
+    let data: Vec<CurrencyRow> = get_data().await?;
+    let last = data.last().unwrap();
 
-        let mut reference_terre = *data.data[0].last().unwrap();
-        let mut reference_air = *data.data[1].last().unwrap();
-        let mut reference_eau = *data.data[2].last().unwrap();
-        let mut reference_feu = *data.data[3].last().unwrap();
-        let mut reference_lum = *data.data[4].last().unwrap();
+    let mut reference_terre = last.terre;
+    let mut reference_air = last.air;
+    let mut reference_eau = last.eau;
+    let mut reference_feu = last.feu;
+    let mut reference_lum = last.lumiere;
 
-        //Simulate for specified amount of time.
-        for _ in 0..amount {
-            //Calculate the new values based on specified currency rate and specified chaos
-            reference_terre = calculate_rate(reference_terre, 1.0).await;
-            reference_air = calculate_rate(reference_air, 50.0).await;
-            reference_eau = calculate_rate(reference_eau, 3.0).await;
-            reference_feu = calculate_rate(reference_feu, 5.0).await;
-            reference_lum = calculate_rate(reference_lum, 1.0).await;
+    //Simulate for specified amount of time.
+    for _ in 0..amount {
+        //Calculate the new values based on specified currency rate and specified chaos
+        reference_terre = calculate_rate(reference_terre, 1.0).await;
+        reference_air = calculate_rate(reference_air, 50.0).await;
+        reference_eau = calculate_rate(reference_eau, 3.0).await;
+        reference_feu = calculate_rate(reference_feu, 5.0).await;
+        reference_lum = calculate_rate(reference_lum, 1.0).await;
 
-            data.data[0].push(reference_terre);
-            data.data[1].push(reference_air);
-            data.data[2].push(reference_eau);
-            data.data[3].push(reference_feu);
-            data.data[4].push(reference_lum);
-        }
-
-        write_file(CONFIG_PATH, serde_json::to_string(&data).unwrap())
-            .expect("Could not write to file.");
+        push_data((
+            reference_terre,
+            reference_air,
+            reference_eau,
+            reference_feu,
+            reference_lum,
+        ))
+        .await?
     }
+
+    Ok(())
 }
 
 /**
 Store currency values in file using a tupple (Terre, Air, Eau, Feu, Lumière)
 */
-async fn push_data(data: (f64, f64, f64, f64, f64), msg: &Message) {
-    let mut config;
-    if Path::new(CONFIG_PATH).exists() {
-        config = get_data().await;
-    } else {
-        config = Data::from(msg.clone());
-    }
+async fn push_data(data: (f64, f64, f64, f64, f64)) -> Result<(), sql::Error> {
+    let conn = init_db()?;
 
-    config.data[0].push(data.0);
-    config.data[1].push(data.1);
-    config.data[2].push(data.2);
-    config.data[3].push(data.3);
-    config.data[4].push(data.4);
+    conn.execute(
+        "INSERT INTO currency_data (terre, air, eau, feu, lumiere) VALUES (?1, ?2, ?3, ?4, ?5)",
+        sql::params![data.0, data.1, data.2, data.3, data.4],
+    )
+    .unwrap();
 
-    write_file(CONFIG_PATH, serde_json::to_string(&config).unwrap())
-        .expect("Could not write to file.");
+    Ok(())
 }
 
 #[inline]
@@ -260,8 +279,41 @@ async fn fak_you(ctx: &Context, command: &CommandInteraction) {
     command.create_response(&ctx.http, builder).await.unwrap();
 }
 
-async fn get_data() -> Data {
-    serde_json::from_slice(&fs::read(CONFIG_PATH).expect("Unable to read file.")).unwrap()
+struct CurrencyRow {
+    terre: f64,
+    air: f64,
+    eau: f64,
+    feu: f64,
+    lumiere: f64,
+}
+impl Clone for CurrencyRow {
+    fn clone(&self) -> Self {
+        Self {
+            terre: self.terre,
+            air: self.air,
+            eau: self.eau,
+            feu: self.feu,
+            lumiere: self.lumiere,
+        }
+    }
+}
+async fn get_data() -> Result<Vec<CurrencyRow>, sql::Error> {
+    let conn = init_db()?;
+    let mut stmt =
+        conn.prepare("SELECT terre, air, eau, feu, lumiere FROM currency_data order by id ASC")?;
+    let data = stmt
+        .query_map([], |row| {
+            Ok(CurrencyRow {
+                terre: row.get(0)?,
+                air: row.get(1)?,
+                eau: row.get(2)?,
+                feu: row.get(3)?,
+                lumiere: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(data)
 }
 
 fn write_file<P, S>(path: P, contents: S) -> Result<(), io::Error>
@@ -304,34 +356,6 @@ async fn calculate_rate(value: f64, chaos: f64) -> f64 {
         .unwrap()
 }
 
-fn find_max(x: &Vec<f64>) -> f64 {
-    *x.iter()
-        .max_by(|a, b| {
-            if a.max(**b) == **a {
-                Ordering::Greater
-            } else if a.max(**b) == **b {
-                Ordering::Less
-            } else {
-                Ordering::Equal
-            }
-        })
-        .unwrap()
-}
-
-fn find_min(x: &Vec<f64>) -> f64 {
-    *x.iter()
-        .min_by(|a, b| {
-            if a.max(**b) == **a {
-                Ordering::Greater
-            } else if a.max(**b) == **b {
-                Ordering::Less
-            } else {
-                Ordering::Equal
-            }
-        })
-        .unwrap()
-}
-
 #[inline]
 /**
 Convert float 64 to BigRationnal
@@ -340,50 +364,75 @@ fn to_big_rationnal(x: f64) -> Ratio<BigInt> {
     BigRational::from_f64(x).unwrap()
 }
 
-async fn draw_graph() {
+struct CurrencyColumn {
+    terre: Vec<f64>,
+    air: Vec<f64>,
+    eau: Vec<f64>,
+    feu: Vec<f64>,
+    lumiere: Vec<f64>,
+}
+impl Default for CurrencyColumn {
+    fn default() -> Self {
+        Self {
+            terre: Vec::new(),
+            air: Vec::new(),
+            eau: Vec::new(),
+            feu: Vec::new(),
+            lumiere: Vec::new(),
+        }
+    }
+}
+fn get_currency_columns(data: &Vec<CurrencyRow>) -> CurrencyColumn {
+    let mut cols = CurrencyColumn::default();
+
+    for row in data {
+        cols.terre.push(row.terre);
+        cols.air.push(row.air);
+        cols.eau.push(row.eau);
+        cols.feu.push(row.feu);
+        cols.lumiere.push(row.lumiere);
+    }
+
+    cols
+}
+
+async fn draw_graph() -> Result<(), sql::Error> {
     //Scoping here allows the graph to be dropped and the svg file created before we call render_svg.
     {
-        let mut data = get_data().await;
+        let mut data: Vec<CurrencyRow> = get_data().await?;
 
         let root_drawing_area =
             SVGBackend::new("./images/graph.svg", (1440, 1080)).into_drawing_area();
 
         root_drawing_area.fill(&WHITE).unwrap();
 
-        let vec_size = data.data[0].len() as f64;
+        let vec_size = data.len() as f64;
 
         if vec_size > 28.0 {
-            data.data[0] = data.data[0]
-                .drain((&data.data[0].len() - 28)..data.data[0].len())
-                .collect();
-            data.data[2] = data.data[2]
-                .drain((&data.data[2].len() - 28)..data.data[2].len())
-                .collect();
-            data.data[3] = data.data[3]
-                .drain((&data.data[3].len() - 28)..data.data[3].len())
-                .collect();
-            data.data[1] = data.data[1]
-                .drain((&data.data[1].len() - 28)..data.data[1].len())
-                .collect();
-            data.data[4] = data.data[4]
-                .drain((&data.data[4].len() - 28)..data.data[4].len())
-                .collect();
+            data = data[(vec_size - 28.0) as usize..].to_vec()
         }
 
-        let max_terre = find_max(&data.data[0]);
-        let max_eau = find_max(&data.data[2]) / 10.0;
-        let max_feu = find_max(&data.data[3]) / 50.0;
-        let max_air = find_max(&data.data[1]) / 200.0;
-        let max_lum = find_max(&data.data[4]);
+        let max = data
+            .iter()
+            .map(|row| {
+                row.terre
+                    .max(row.air / 200.0)
+                    .max(row.eau / 10.0)
+                    .max(row.feu / 50.0)
+                    .max(row.lumiere)
+            })
+            .fold(f64::MIN, f64::max);
 
-        let min_terre = find_min(&data.data[0]);
-        let min_eau = find_min(&data.data[2]) / 10.0;
-        let min_feu = find_min(&data.data[3]) / 50.0;
-        let min_air = find_min(&data.data[1]) / 200.0;
-        let min_lum = find_min(&data.data[4]);
-
-        let max = max_terre.max(max_eau.max(max_feu.max(max_air.max(max_air.max(max_lum)))));
-        let min = min_terre.min(min_eau.min(min_feu.min(min_air.min(min_air.min(min_lum)))));
+        let min = data
+            .iter()
+            .map(|row| {
+                row.terre
+                    .min(row.air / 200.0)
+                    .min(row.eau / 10.0)
+                    .min(row.feu / 50.0)
+                    .min(row.lumiere)
+            })
+            .fold(f64::MAX, f64::min);
 
         //Find where to start the graph on x axis
         let start;
@@ -392,6 +441,8 @@ async fn draw_graph() {
         } else {
             start = vec_size - 28.0
         }
+
+        let data_columns = get_currency_columns(&data);
 
         //Index useful for iterators
         let mut index;
@@ -418,7 +469,7 @@ async fn draw_graph() {
         index = start - 1.0;
         chart
             .draw_series(LineSeries::new(
-                (data.data[0].iter()).map(|x| {
+                (data_columns.terre.iter()).map(|x| {
                     index += 1.0;
                     (index, *x)
                 }),
@@ -431,7 +482,7 @@ async fn draw_graph() {
         index = start - 1.0;
         chart
             .draw_series(LineSeries::new(
-                (data.data[1].iter()).map(|x| {
+                (data_columns.air.iter()).map(|x| {
                     index += 1.0;
                     (index, *x / 200.0)
                 }),
@@ -444,7 +495,7 @@ async fn draw_graph() {
         index = start - 1.0;
         chart
             .draw_series(LineSeries::new(
-                (data.data[2].iter()).map(|x| {
+                (data_columns.eau.iter()).map(|x| {
                     index += 1.0;
                     (index, *x / 10.0)
                 }),
@@ -457,7 +508,7 @@ async fn draw_graph() {
         index = start - 1.0;
         chart
             .draw_series(LineSeries::new(
-                (data.data[3].iter()).map(|x| {
+                (data_columns.feu.iter()).map(|x| {
                     index += 1.0;
                     (index, *x / 50.0)
                 }),
@@ -470,7 +521,7 @@ async fn draw_graph() {
         index = start - 1.0;
         chart
             .draw_series(LineSeries::new(
-                (data.data[4].iter()).map(|x| {
+                (data_columns.lumiere.iter()).map(|x| {
                     index += 1.0;
                     (index, *x)
                 }),
@@ -491,6 +542,7 @@ async fn draw_graph() {
 
     //Convert SVG image to PNG
     render_svg();
+    Ok(())
 }
 
 /**
@@ -518,6 +570,8 @@ fn render_svg() {
 async fn main() {
     //Initialise environment variables.
     let token = dotenv::var("TOKEN").expect("Could not read environment variables.");
+
+    init_db().unwrap();
 
     //Starting discord client
     let mut client = Client::builder(token, GatewayIntents::from(GatewayIntents::all()))
