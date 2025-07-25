@@ -2,5 +2,6 @@
 .git/
 .env
 config
+currency.sqlite3
 images/
 Cargo.lock

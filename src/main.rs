@@ -3,7 +3,7 @@ const CONFIG_PATH: &str = "./config";
 use chrono::Local;
 use num::{rational::Ratio, BigInt, BigRational, FromPrimitive, ToPrimitive};
 use plotters::{
-    data,
+    coord::types::{RangedCoordf64, RangedCoordusize},
     prelude::*,
     style::full_palette::{BROWN, LIGHTBLUE, YELLOW_800},
 };
@@ -21,7 +21,7 @@ use serenity::{
     model::{channel::Message, gateway::Ready},
     prelude::*,
 };
-use std::{cmp::Ordering, fs, io, path::Path, time::Duration};
+use std::{fs, io, path::Path, time::Duration};
 
 #[derive(Serialize, Deserialize)]
 struct Data {
@@ -364,14 +364,14 @@ fn to_big_rationnal(x: f64) -> Ratio<BigInt> {
     BigRational::from_f64(x).unwrap()
 }
 
-struct CurrencyColumn {
+struct CurrencyColumns {
     terre: Vec<f64>,
     air: Vec<f64>,
     eau: Vec<f64>,
     feu: Vec<f64>,
     lumiere: Vec<f64>,
 }
-impl Default for CurrencyColumn {
+impl Default for CurrencyColumns {
     fn default() -> Self {
         Self {
             terre: Vec::new(),
@@ -382,8 +382,8 @@ impl Default for CurrencyColumn {
         }
     }
 }
-fn get_currency_columns(data: &Vec<CurrencyRow>) -> CurrencyColumn {
-    let mut cols = CurrencyColumn::default();
+fn get_currency_columns(data: &Vec<CurrencyRow>) -> CurrencyColumns {
+    let mut cols = CurrencyColumns::default();
 
     for row in data {
         cols.terre.push(row.terre);
@@ -396,6 +396,27 @@ fn get_currency_columns(data: &Vec<CurrencyRow>) -> CurrencyColumn {
     cols
 }
 
+fn add_currency_to_graph(
+    chart: &mut ChartContext<'_, SVGBackend, Cartesian2d<RangedCoordusize, RangedCoordf64>>,
+    series: Vec<f64>,
+    label: &str,
+    start_index: usize,
+    color: RGBColor,
+    multiplier: f64,
+) {
+    chart
+        .draw_series(LineSeries::new(
+            series
+                .iter()
+                .enumerate()
+                .map(|(x, y)| (x + start_index, *y * multiplier)),
+            &color,
+        ))
+        .unwrap()
+        .label(label)
+        .legend(move |(x, y)| Circle::new((x, y), 5, color.filled()));
+}
+
 async fn draw_graph() -> Result<(), sql::Error> {
     //Scoping here allows the graph to be dropped and the svg file created before we call render_svg.
     {
@@ -406,10 +427,10 @@ async fn draw_graph() -> Result<(), sql::Error> {
 
         root_drawing_area.fill(&WHITE).unwrap();
 
-        let vec_size = data.len() as f64;
+        let vec_size = data.len();
 
-        if vec_size > 28.0 {
-            data = data[(vec_size - 28.0) as usize..].to_vec()
+        if vec_size > 28 {
+            data = data[(vec_size - 28)..].to_vec()
         }
 
         let max = data
@@ -435,22 +456,21 @@ async fn draw_graph() -> Result<(), sql::Error> {
             .fold(f64::MAX, f64::min);
 
         //Find where to start the graph on x axis
-        let start;
-        if vec_size < 28.0 {
-            start = 0.0
+        let start: usize;
+        if vec_size < 28 {
+            start = 0
         } else {
-            start = vec_size - 28.0
+            start = vec_size - 28
         }
 
         let data_columns = get_currency_columns(&data);
 
-        //Index useful for iterators
-        let mut index;
+        //Create the chart
         let mut chart = ChartBuilder::on(&root_drawing_area)
             .set_left_and_bottom_label_area_size(60)
             .margin_right(60)
             .margin_top(60)
-            .build_cartesian_2d(start..(vec_size - 1.0), min..max)
+            .build_cartesian_2d(start..(vec_size - 1), min..max)
             .unwrap();
 
         chart
@@ -458,78 +478,30 @@ async fn draw_graph() -> Result<(), sql::Error> {
             .label_style(("sans-serif", 20))
             .y_label_formatter(&|y| format!("{:.4}", y))
             //Set the amount of grid lines as the smallest number between 28 and the amount of integers in the domain.
-            .x_labels(28_f64.min(vec_size) as usize)
-            //Remove decimals from x axis
-            .x_label_formatter(&|x| format!("{:.0}", x))
-            //remove minor grid
-            .max_light_lines(0)
+            .x_labels(28.min(vec_size))
             .draw()
             .unwrap();
 
-        index = start - 1.0;
-        chart
-            .draw_series(LineSeries::new(
-                (data_columns.terre.iter()).map(|x| {
-                    index += 1.0;
-                    (index, *x)
-                }),
-                &BROWN,
-            ))
-            .unwrap()
-            .label("Terre")
-            .legend(|(x, y)| Circle::new((x, y), 5, BROWN.filled()));
-
-        index = start - 1.0;
-        chart
-            .draw_series(LineSeries::new(
-                (data_columns.air.iter()).map(|x| {
-                    index += 1.0;
-                    (index, *x / 200.0)
-                }),
-                &LIGHTBLUE,
-            ))
-            .unwrap()
-            .label("Air")
-            .legend(|(x, y)| Circle::new((x, y), 5, LIGHTBLUE.filled()));
-
-        index = start - 1.0;
-        chart
-            .draw_series(LineSeries::new(
-                (data_columns.eau.iter()).map(|x| {
-                    index += 1.0;
-                    (index, *x / 10.0)
-                }),
-                &BLUE,
-            ))
-            .unwrap()
-            .label("Eau")
-            .legend(|(x, y)| Circle::new((x, y), 5, BLUE.filled()));
-
-        index = start - 1.0;
-        chart
-            .draw_series(LineSeries::new(
-                (data_columns.feu.iter()).map(|x| {
-                    index += 1.0;
-                    (index, *x / 50.0)
-                }),
-                &RED,
-            ))
-            .unwrap()
-            .label("Feu")
-            .legend(|(x, y)| Circle::new((x, y), 5, RED.filled()));
-
-        index = start - 1.0;
-        chart
-            .draw_series(LineSeries::new(
-                (data_columns.lumiere.iter()).map(|x| {
-                    index += 1.0;
-                    (index, *x)
-                }),
-                &YELLOW_800,
-            ))
-            .unwrap()
-            .label("Lumière/Ténèbre")
-            .legend(|(x, y)| Circle::new((x, y), 5, YELLOW_800.filled()));
+        //Draw all the curves
+        add_currency_to_graph(&mut chart, data_columns.terre, "Terre", start, BROWN, 1.);
+        add_currency_to_graph(
+            &mut chart,
+            data_columns.air,
+            "Air",
+            start,
+            LIGHTBLUE,
+            1. / 200.,
+        );
+        add_currency_to_graph(&mut chart, data_columns.eau, "Eau", start, BLUE, 1. / 10.);
+        add_currency_to_graph(&mut chart, data_columns.feu, "Feu", start, RED, 1. / 50.);
+        add_currency_to_graph(
+            &mut chart,
+            data_columns.lumiere,
+            "Lumière/Ténèbre",
+            start,
+            YELLOW_800,
+            1.,
+        );
 
         chart
             .configure_series_labels()
