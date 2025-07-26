@@ -262,7 +262,6 @@ async fn push_data(data: (f64, f64, f64, f64, f64)) -> Result<(), sql::Error> {
     Ok(())
 }
 
-#[inline]
 fn is_admin(member: impl Into<PartialMember>) -> bool {
     member.into().permissions.unwrap().administrator()
 }
@@ -270,7 +269,6 @@ fn is_admin(member: impl Into<PartialMember>) -> bool {
 /**
 Sends a permission denied error to the channel.
 */
-#[inline]
 async fn fak_you(ctx: &Context, command: &CommandInteraction) {
     let builder = CreateInteractionResponse::Message(
         CreateInteractionResponseMessage::new()
