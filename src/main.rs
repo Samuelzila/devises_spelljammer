@@ -1,13 +1,13 @@
 const CONFIG_PATH: &str = "./config";
 
 use chrono::Local;
-use num::{rational::Ratio, BigInt, BigRational, FromPrimitive, ToPrimitive};
 use plotters::{
     coord::types::{RangedCoordf64, RangedCoordusize},
     prelude::*,
     style::full_palette::{BROWN, LIGHTBLUE, YELLOW_800},
 };
-use rand::Rng;
+use rand::rng;
+use rand_distr::{Distribution, Normal};
 use resvg::usvg;
 use rusqlite as sql;
 use serde::{Deserialize, Serialize};
@@ -227,11 +227,12 @@ async fn add_data(amount: usize) -> Result<(), sql::Error> {
     //Simulate for specified amount of time.
     for _ in 0..amount {
         //Calculate the new values based on specified currency rate and specified chaos
-        reference_terre = calculate_rate(reference_terre, 1.0).await;
-        reference_air = calculate_rate(reference_air, 50.0).await;
-        reference_eau = calculate_rate(reference_eau, 3.0).await;
-        reference_feu = calculate_rate(reference_feu, 5.0).await;
-        reference_lum = calculate_rate(reference_lum, 1.0).await;
+        let annual_rate = 0.075;
+        reference_terre = calculate_rate(reference_terre, annual_rate, 0.01).await;
+        reference_air = calculate_rate(reference_air, annual_rate, 0.50).await;
+        reference_eau = calculate_rate(reference_eau, annual_rate, 0.03).await;
+        reference_feu = calculate_rate(reference_feu, annual_rate, 0.05).await;
+        reference_lum = calculate_rate(reference_lum, annual_rate, 0.01).await;
 
         push_data((
             reference_terre,
@@ -334,34 +335,19 @@ where
 /**
 Calculate new value for currency by passing its current value and a chaos value.
 */
-async fn calculate_rate(value: f64, chaos: f64) -> f64 {
-    //The rate is the increase in value per day, in percentage.
-    //It appears that the actual increase is half of the input value.
-    let rate = to_big_rationnal(0.15) / to_big_rationnal(365.2422);
-    //x corresponds to the rate plus the chaos per day. The bigger either value is, the greater the
-    //fluctuation will be. the chaos behaves similarly to a standard deviation.
-    let x = to_big_rationnal(chaos) / to_big_rationnal(36524.22) + &rate;
-    //y is the percentage that "cancels out" x's chaos part in an exponential function.
-    //If we were to multiply a value by 1 + x and then by 1 + y, the result would be the value multiplied by the rate.
-    //x and y are in a way the upper and lower bounds, respectively, of our chaos.
-    let y =
-        ((to_big_rationnal(1.0) + &rate) / (to_big_rationnal(1.0) + &x)) - to_big_rationnal(1.0);
+async fn calculate_rate(value: f64, target_annual_rate: f64, chaos: f64) -> f64 {
+    let days_in_year: f64 = 365.2422;
 
-    //We generate a number between 0 and (x - y), then add y. Effectively, our random number is between y and x.
-    let random = to_big_rationnal(rand::thread_rng().gen_range(0.0..=1.0)) * (&x - &y) + &y;
+    let mu = ((1.0 + target_annual_rate).powf(1.0 / days_in_year)) - (1.0);
+
+    let sigma = chaos / days_in_year.sqrt();
+
+    let normal = Normal::new(mu, sigma).unwrap();
+
+    let daily_rate = normal.sample(&mut rng());
 
     //This is just a one step exponential function with our random number as a parameter.
-    (to_big_rationnal(value) * (to_big_rationnal(1.0) + (random)))
-        .to_f64()
-        .unwrap()
-}
-
-#[inline]
-/**
-Convert float 64 to BigRationnal
-*/
-fn to_big_rationnal(x: f64) -> Ratio<BigInt> {
-    BigRational::from_f64(x).unwrap()
+    value * (1.0 + daily_rate)
 }
 
 struct CurrencyColumns {
