@@ -98,6 +98,29 @@ impl EventHandler for Handler {
         .await
         .unwrap();
 
+        motc.create_command(
+            &ctx.http,
+            CreateCommand::new("currency_convert")
+                .description("Convert a specified amount of one currency to another")
+                .add_option(CreateCommandOption::new(
+                    CommandOptionType::Integer,
+                    "amount",
+                    "Amount of currency to convert.",
+                ))
+                .add_option(CreateCommandOption::new(
+                    CommandOptionType::String,
+                    "from",
+                    "Currency to convert from.",
+                ))
+                .add_option(CreateCommandOption::new(
+                    CommandOptionType::String,
+                    "to",
+                    "Currency to convert to.",
+                )),
+        )
+        .await
+        .unwrap();
+
         //Crate timer for generating data
         tokio::spawn(async move {
             loop {
@@ -176,6 +199,52 @@ impl EventHandler for Handler {
 
                     update_message(&ctx).await.unwrap();
                 }
+            } else if command.data.name == "currency_convert" {
+                //Get the last values of the currencies
+                let data = get_data().await.unwrap();
+                let last = data.last().unwrap();
+
+                let amount = command.data.options[0].value.as_i64().unwrap();
+
+                let from_value: f64;
+                let to_value: f64;
+
+                // TODO: Add better error messages
+                //Find the value of the currency to convert from and to.
+                match command.data.options[1].value.as_str().unwrap().to_lowercase().as_str() {
+                    "terre" => from_value = last.terre,
+                    "air" => from_value = last.air,
+                    "eau" => from_value = last.eau,
+                    "feu" => from_value = last.feu,
+                    "lumière" | "tenèbre" | "lumiere" | "tenebre" => from_value = last.lumiere,
+                    "cp" | "référence" | "reference" | "demi-miche" => from_value = 1.0,
+                    _ => {
+                        fak_you(&ctx, &command).await;
+                        return;
+                    }
+                }
+
+                match command.data.options[2].value.as_str().unwrap().to_lowercase().as_str() {
+                    "terre" => to_value = last.terre,
+                    "air" => to_value = last.air,
+                    "eau" => to_value = last.eau,
+                    "feu" => to_value = last.feu,
+                    "lumiere" | "tenebre" | "lumière" | "ténèbre" => to_value = last.lumiere,
+                    "cp" | "référence" | "reference" | "demi-miche" => to_value = 1.0,
+                    _ => {
+                        fak_you(&ctx, &command).await;
+                        return;
+                    }
+                }
+
+                //Calculate the converted amount and send it to the user.
+                let converted_amount = ((amount as f64) * (to_value / from_value)).round() as usize;
+
+                let builder =
+                    CreateInteractionResponse::Message(CreateInteractionResponseMessage::new()
+                        .content(format!("Valeur convertie: {}.", converted_amount)).ephemeral(true));
+
+                command.create_response(&ctx.http, builder).await.unwrap();
             }
         }
     }
