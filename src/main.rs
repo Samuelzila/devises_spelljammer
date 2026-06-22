@@ -217,7 +217,7 @@ impl EventHandler for Handler {
                     "eau" => from_value = last.eau,
                     "feu" => from_value = last.feu,
                     "lumière" | "tenèbre" | "lumiere" | "tenebre" => from_value = last.lumiere,
-                    "cp" | "référence" | "reference" | "demi-miche" => from_value = 1.0,
+                    "cp" | "référence" | "reference" | "demi-miche" | "pc" => from_value = 1.0,
                     _ => {
                         fak_you(&ctx, &command).await;
                         return;
@@ -230,7 +230,7 @@ impl EventHandler for Handler {
                     "eau" => to_value = last.eau,
                     "feu" => to_value = last.feu,
                     "lumiere" | "tenebre" | "lumière" | "ténèbre" => to_value = last.lumiere,
-                    "cp" | "référence" | "reference" | "demi-miche" => to_value = 1.0,
+                    "cp" | "référence" | "reference" | "demi-miche" | "pc" => to_value = 1.0,
                     _ => {
                         fak_you(&ctx, &command).await;
                         return;
