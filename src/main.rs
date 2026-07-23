@@ -523,15 +523,20 @@ async fn draw_graph() -> Result<(), sql::Error> {
             .set_left_and_bottom_label_area_size(60)
             .margin_right(60)
             .margin_top(60)
+            .caption(
+                "Inflation au cours du temps (plus c'est bas, mieux c'est)",
+                ("sans-serif", 40),
+            )
             .build_cartesian_2d(start..(vec_size - 1), min..max)
             .unwrap();
 
         chart
             .configure_mesh()
             .label_style(("sans-serif", 20))
-            .y_label_formatter(&|y| format!("{:.4}", y))
-            //Set the amount of grid lines as the smallest number between 28 and the amount of integers in the domain.
-            .x_labels(28.min(vec_size))
+            .y_label_formatter(&|y| format!("{:.2}", y))
+            .x_desc("Jours")
+            .y_desc("Inflation")
+            .axis_desc_style(("sans-serif", 25))
             .draw()
             .unwrap();
 
