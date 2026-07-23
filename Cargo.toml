@@ -1,6 +1,6 @@
 [package]
 name = "devises_spelljammer"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -13,10 +13,10 @@ plotters = "0.3"
 serde = "1.0.197"
 serde_json = "1.0.128"
 chrono = "0.4.35"
-resvg = "0.40.0"
 dotenv = "0.15.0"
 rusqlite = {version="0.37.0", features=["bundled"]}
 rand_distr = "0.5.1"
+pathfinder_simd = {version="0.5.6", features=["pf-no-simd"]}
 
 [profile.release]
 lto="fat"

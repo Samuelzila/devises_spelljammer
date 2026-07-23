@@ -8,7 +8,6 @@ use plotters::{
 };
 use rand::rng;
 use rand_distr::{Distribution, Normal};
-use resvg::usvg;
 use rusqlite as sql;
 use serde::{Deserialize, Serialize};
 use serenity::{
@@ -450,7 +449,7 @@ fn get_currency_columns(data: &Vec<CurrencyRow>) -> CurrencyColumns {
 }
 
 fn add_currency_to_graph(
-    chart: &mut ChartContext<'_, SVGBackend, Cartesian2d<RangedCoordusize, RangedCoordf64>>,
+    chart: &mut ChartContext<'_, BitMapBackend, Cartesian2d<RangedCoordusize, RangedCoordf64>>,
     series: Vec<f64>,
     label: &str,
     start_index: usize,
@@ -471,12 +470,12 @@ fn add_currency_to_graph(
 }
 
 async fn draw_graph() -> Result<(), sql::Error> {
-    //Scoping here allows the graph to be dropped and the svg file created before we call render_svg.
+    //Scoping here allows the graph to be dropped and the png created.
     {
         let mut data: Vec<CurrencyRow> = get_data().await?;
 
         let root_drawing_area =
-            SVGBackend::new("./images/graph.svg", (1440, 1080)).into_drawing_area();
+            BitMapBackend::new("./images/graph.png", (1440, 1080)).into_drawing_area();
 
         root_drawing_area.fill(&WHITE).unwrap();
 
@@ -570,30 +569,7 @@ async fn draw_graph() -> Result<(), sql::Error> {
             .unwrap();
     }
 
-    //Convert SVG image to PNG
-    render_svg();
     Ok(())
-}
-
-/**
-Very ugly function to render svg to png
-*/
-fn render_svg() {
-    let mut fontdb = usvg::fontdb::Database::default();
-    fontdb.load_system_fonts();
-    let tree = usvg::Tree::from_data(
-        &fs::read("./images/graph.svg").unwrap(),
-        &usvg::Options::default(),
-        &fontdb,
-    )
-    .unwrap();
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(1440, 1080).unwrap();
-    resvg::render(
-        &tree,
-        resvg::tiny_skia::Transform::default(),
-        &mut pixmap.as_mut(),
-    );
-    pixmap.save_png("./images/graph.png").unwrap();
 }
 
 #[tokio::main]
